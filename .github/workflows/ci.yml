@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go-version: ["1.22", "1.23"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+
+      # go.sum is intentionally not committed to this repo -- it was
+      # written in a sandbox with no network access to proxy.golang.org,
+      # so there was no way to compute real, verifiable module hashes
+      # locally. `go mod tidy` here is the first time the module graph is
+      # actually resolved against the real internet, on every run, which
+      # doubles as the first real correctness signal for this project (see
+      # README, "How this was built").
+      - name: Tidy modules
+        run: go mod tidy
+
+      - name: Check gofmt formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "The following files are not gofmt-formatted:"
+            echo "$unformatted"
+            echo
+            echo "Run 'gofmt -w .' locally and commit the result."
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build ./...
+
+      - name: Unit tests
+        run: go test ./... -v -race
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build producer image
+        run: docker build -f cmd/producer/Dockerfile -t orderflow-producer .
+
+      - name: Build consumer image
+        run: docker build -f cmd/consumer/Dockerfile -t orderflow-consumer .
+
+      - name: Build notifier image
+        run: docker build -f cmd/notifier/Dockerfile -t orderflow-notifier .
