@@ -34,14 +34,14 @@ type Config struct {
 // Load reads every setting from the environment, falling back to values
 // that make `make up && make demo` work end to end with zero extra setup.
 func Load() Config {
-	return Config{
-		Brokers:               splitCSV(getenv("KAFKA_BROKERS", "localhost:9092")),
-		HTTPAddr:              getenv("HTTP_ADDR", ":8080"),
-		GroupID:               getenv("KAFKA_GROUP_ID", "orderflow"),
-		TopicOrders:           getenv("KAFKA_TOPIC_ORDERS", "orders"),
-		TopicOrdersProcessed:  getenv("KAFKA_TOPIC_ORDERS_PROCESSED", "orders.processed"),
-		TopicOrdersDLQ:        getenv("KAFKA_TOPIC_ORDERS_DLQ", "orders.dlq"),
-	}
+	var c Config
+	c.Brokers = splitCSV(getenv("KAFKA_BROKERS", "localhost:9092"))
+	c.HTTPAddr = getenv("HTTP_ADDR", ":8080")
+	c.GroupID = getenv("KAFKA_GROUP_ID", "orderflow")
+	c.TopicOrders = getenv("KAFKA_TOPIC_ORDERS", "orders")
+	c.TopicOrdersProcessed = getenv("KAFKA_TOPIC_ORDERS_PROCESSED", "orders.processed")
+	c.TopicOrdersDLQ = getenv("KAFKA_TOPIC_ORDERS_DLQ", "orders.dlq")
+	return c
 }
 
 func getenv(key, fallback string) string {
