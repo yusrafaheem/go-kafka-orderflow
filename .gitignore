@@ -1,0 +1,19 @@
+# Build artifacts
+bin/
+*.exe
+*.test
+*.out
+
+# go.sum is intentionally not committed -- see README "How this was built".
+# CI regenerates it fresh on every run via `go mod tidy`.
+go.sum
+
+# Local env / data
+.env
+*.jsonl
+data/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/

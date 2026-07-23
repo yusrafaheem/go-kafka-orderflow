@@ -1,0 +1,75 @@
+services:
+  # Single-node Kafka in KRaft mode -- no ZooKeeper needed. Two listeners
+  # are deliberate, not decoration: PLAINTEXT (advertised as kafka:9092) is
+  # what the producer/consumer/notifier containers use over the compose
+  # network, while EXTERNAL (advertised as localhost:29092) is what a tool
+  # running on your host machine -- kcat, an ad-hoc Go program, `make
+  # demo` -- uses instead. A single listener advertised as "localhost"
+  # looks like it works (the initial bootstrap connection succeeds) and
+  # then breaks the moment a client actually tries to produce or consume,
+  # because Kafka's metadata response tells every client to reconnect to
+  # whatever address is advertised -- "localhost" from inside the
+  # consumer's own container resolves to the consumer container, not the
+  # broker. This is one of the most common first-time Kafka-in-Docker
+  # mistakes, and the two-listener split is the standard fix.
+  kafka:
+    image: bitnami/kafka:3.7
+    ports:
+      - "29092:29092"
+    environment:
+      - KAFKA_CFG_NODE_ID=0
+      - KAFKA_CFG_PROCESS_ROLES=controller,broker
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092,EXTERNAL://:29092,CONTROLLER://:9093
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092,EXTERNAL://localhost:29092
+      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      - KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=0@kafka:9093
+      - KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_CFG_INTER_BROKER_LISTENER_NAME=PLAINTEXT
+      - ALLOW_PLAINTEXT_LISTENER=yes
+    volumes:
+      - kafka_data:/bitnami/kafka
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+
+  producer:
+    build:
+      context: .
+      dockerfile: cmd/producer/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - KAFKA_BROKERS=kafka:9092
+      - HTTP_ADDR=:8080
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  consumer:
+    build:
+      context: .
+      dockerfile: cmd/consumer/Dockerfile
+    environment:
+      - KAFKA_BROKERS=kafka:9092
+      - KAFKA_GROUP_ID=orderflow-consumer
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  notifier:
+    build:
+      context: .
+      dockerfile: cmd/notifier/Dockerfile
+    environment:
+      - KAFKA_BROKERS=kafka:9092
+      - NOTIFIER_GROUP_ID=orderflow-notifier
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+volumes:
+  kafka_data:
+    driver: local
