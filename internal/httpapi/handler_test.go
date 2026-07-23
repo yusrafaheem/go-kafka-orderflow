@@ -160,3 +160,79 @@ func TestOrdersHandlerWrongMethod(t *testing.T) {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusMethodNotAllowed)
 	}
 }
+
+// TestOrdersHandlerMultipleItems checks that every line item in the
+// request body actually makes it through decode -> publish, not just the
+// first one -- a slicing bug here wouldn't show up in the single-item
+// tests above.
+func TestOrdersHandlerMultipleItems(t *testing.T) {
+	pub := &fakePublisher{}
+	h := &OrdersHandler{Publisher: pub, Topic: "orders"}
+
+	body := `{"customer_id":"cust-2","items":[` +
+		`{"sku":"sku-1","quantity":2,"unit_price_cents":500},` +
+		`{"sku":"sku-2","quantity":1,"unit_price_cents":1200}]}`
+	req := httptest.NewRequest(http.MethodPost, "/orders", bytes.NewBufferString(body))
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusAccepted, rec.Body.String())
+	}
+
+	call, ok := pub.lastCall()
+	if !ok {
+		t.Fatal("Publisher.Publish was never called")
+	}
+
+	var published order.Order
+	if err := json.Unmarshal(call.value, &published); err != nil {
+		t.Fatalf("failed to decode published payload: %v", err)
+	}
+	if len(published.Items) != 2 {
+		t.Fatalf("published %d items, want 2", len(published.Items))
+	}
+	if published.Items[0].SKU != "sku-1" || published.Items[1].SKU != "sku-2" {
+		t.Errorf("published items = %+v, want sku-1 then sku-2 in the order they were sent", published.Items)
+	}
+}
+
+// TestOrdersHandlerEmptyBody checks the io.EOF-from-an-empty-body case
+// specifically, since json.Decoder reports that differently from a body
+// that contains actual malformed JSON, and both need to land on 400.
+func TestOrdersHandlerEmptyBody(t *testing.T) {
+	pub := &fakePublisher{}
+	h := &OrdersHandler{Publisher: pub, Topic: "orders"}
+
+	req := httptest.NewRequest(http.MethodPost, "/orders", bytes.NewBufferString(""))
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d for an empty body", rec.Code, http.StatusBadRequest)
+	}
+	if _, ok := pub.lastCall(); ok {
+		t.Error("Publisher.Publish was called for an empty request body")
+	}
+}
+
+// TestOrdersHandlerIgnoresUnknownFields documents that the handler's JSON
+// decoding is deliberately lenient: a client sending an extra field (e.g.
+// a not-yet-implemented coupon_code) shouldn't get a hard failure just
+// because the server doesn't recognize it yet.
+func TestOrdersHandlerIgnoresUnknownFields(t *testing.T) {
+	pub := &fakePublisher{}
+	h := &OrdersHandler{Publisher: pub, Topic: "orders"}
+
+	body := `{"customer_id":"cust-3","items":[{"sku":"sku-1","quantity":1,"unit_price_cents":500}],"coupon_code":"UNUSED10"}`
+	req := httptest.NewRequest(http.MethodPost, "/orders", bytes.NewBufferString(body))
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d; an unrecognized JSON field shouldn't fail decoding, body = %s", rec.Code, http.StatusAccepted, rec.Body.String())
+	}
+}
